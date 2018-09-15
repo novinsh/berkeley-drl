@@ -6,7 +6,7 @@ Before running install Roboschool:
  - https://github.com/openai/roboschool
  - Pre-trained and models from roboschool used for the corresponding environments
  
-Cheers
+Cheers<br>
 -Novin
 
 # CS294-112 HW 1: Imitation Learning
