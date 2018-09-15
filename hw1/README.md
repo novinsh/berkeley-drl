@@ -5,6 +5,9 @@ Previous files remained intact, instead files with _zoo_ or _roboschool_ added w
 Before running install Roboschool:
  - https://github.com/openai/roboschool
  - Pre-trained and models from roboschool used for the corresponding environments
+ 
+Cheers
+-Novin
 
 # CS294-112 HW 1: Imitation Learning
 
