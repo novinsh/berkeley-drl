@@ -1,3 +1,11 @@
+# Using Roboschool instead of Mujoco
+
+Previous files remained intact, instead files with _zoo_ or _roboschool_ added which contains relevant modifications needed to use Roboschool instead.
+
+Before running install Roboschool:
+ - https://github.com/openai/roboschool
+ - Pre-trained and models from roboschool used for the corresponding environments
+
 # CS294-112 HW 1: Imitation Learning
 
 Dependencies:
