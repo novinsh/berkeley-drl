@@ -20,6 +20,7 @@ from load_zoopolicy import ZooPolicyTensorflow, SmallReactivePolicy
 import roboschool
 import re
 
+
 def main():
     import argparse
     parser = argparse.ArgumentParser()
@@ -40,8 +41,6 @@ def main():
         print('loading and building expert policy')
         # policy_fn = load_policy.load_policy(args.expert_policy_file)
         isReacher = (re.compile('/|-').split(args.expert_policy_file)[1] == 'RoboschoolReacher')
-        print("$"*25)
-        print("isReacher: ", isReacher)
         if isReacher:
             pi = SmallReactivePolicy(env.observation_space, env.action_space)
         else:
@@ -66,7 +65,7 @@ def main():
                 actions.append(action)
                 obs, r, done, _ = env.step(action)
                 totalr += r
-                steps += 1
+                steps += 1 
                 if args.render:
                     env.render()
                 if steps % 100 == 0: print("%i/%i"%(steps, max_steps))
@@ -81,8 +80,16 @@ def main():
         expert_data = {'observations': np.array(observations),
                        'actions': np.array(actions)}
 
-        with open(os.path.join('expert_data', args.envname + '.pkl'), 'wb') as f:
+        with open(os.path.join('expert_data', args.envname + '_' \
+                    + str(args.num_rollouts) + '.pkl'), 'wb') as f:
             pickle.dump(expert_data, f, pickle.HIGHEST_PROTOCOL)
+
+        with open(os.path.join('expert_data', args.envname + "_" \
+                    + str(args.num_rollouts) + '_logs.txt'), 'w') as f:
+            f.write("returns: {0}\n".format(returns))
+            f.write("mean return: {0}\n".format(np.mean(returns)))
+            f.write("std of return: {0}\n".format(np.std(returns)))
+
 
 if __name__ == '__main__':
     main()

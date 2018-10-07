@@ -6,11 +6,11 @@ import roboschool
 import re
 
 # HERE ADDED BY NOVIN
-model_dims = {'RoboschoolHopper':       (15, 128, 64, 3),
-              'RoboschoolAnt':          (28, 128, 64, 8),
-              'RoboschoolHalfCheetah':  (26, 128, 64, 6),
-              'RoboschoolHumanoid':     (44, 256, 128, 17),
-              'RoboschoolWalker2d':     (22, 128, 64, 6),
+model_dims = {'RoboschoolHopper':      (15, 128, 64, 3),
+              'RoboschoolAnt':         (28, 128, 64, 8),
+              'RoboschoolHalfCheetah': (26, 128, 64, 6),
+              'RoboschoolHumanoid':    (44, 256, 128, 17),
+              'RoboschoolWalker2d':    (22, 128, 64, 6),
              }
 
 
@@ -21,8 +21,8 @@ class ZooPolicyTensorflow(object):
 
         with tf.variable_scope(name):
             obs_tuple = [
-                tf.placeholder(tf.float32,         (None, 1), name="obs0"),
-                tf.placeholder(tf.float32,        (None, dims[0]), name="obs1"),
+                tf.placeholder(tf.float32, (None, 1), name="obs0"),
+                tf.placeholder(tf.float32, (None, dims[0]), name="obs1"),
             ]
             self.obs_tuple = obs_tuple
 
@@ -55,8 +55,8 @@ class ZooPolicyTensorflow(object):
             (  dense1_b, take_weights_here["weights_dense1_b"]),
             (  dense2_w, take_weights_here["weights_dense2_w"]),
             (  dense2_b, take_weights_here["weights_dense2_b"]),
-            (   final_w, take_weights_here["weights_final_w"]),
-            (   final_b, take_weights_here["weights_final_b"]),
+            (  final_w, take_weights_here["weights_final_w"]),
+            (  final_b, take_weights_here["weights_final_b"]),
         ]
 
         self.weight_assignment_placeholders = []
@@ -83,7 +83,6 @@ class ZooPolicyTensorflow(object):
 
 
 #### from this point downwards everything required solely for the Reacher:
-
 def relu(x):
     return np.maximum(x, 0)
 
