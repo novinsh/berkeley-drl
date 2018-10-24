@@ -1,4 +1,4 @@
-mujoco-py==1.50.1.56
+#mujoco-py==1.50.1.56
 gym==0.10.5
 tensorflow==1.10.0
 numpy==1.14.5
