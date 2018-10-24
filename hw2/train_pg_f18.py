@@ -1,3 +1,7 @@
+# solutions mainly inspired by
+# https://github.com/jalexvig/berkeley_deep_rl/blob/master/hw2/train_pg.py#L144
+# Novin Oct, 2018
+#
 """
 Original code from John Schulman for CS294 Deep Reinforcement Learning Spring 2017
 Adapted for CS294-112 Fall 2017 by Abhishek Gupta and Joshua Achiam
@@ -11,6 +15,9 @@ import os
 import time
 import inspect
 from multiprocessing import Process
+import roboschool
+
+eps = 1e-7 # to avoid division by zero
 
 #============================================================================================#
 # Utilities
@@ -19,7 +26,8 @@ from multiprocessing import Process
 #========================================================================================#
 #                           ----------PROBLEM 2----------
 #========================================================================================#  
-def build_mlp(input_placeholder, output_size, scope, n_layers, size, activation=tf.tanh, output_activation=None):
+def build_mlp(input_placeholder, output_size, scope, n_layers, size, activation=tf.tanh,\
+        output_activation=None):
     """
         Builds a feedforward neural network
         
@@ -37,9 +45,17 @@ def build_mlp(input_placeholder, output_size, scope, n_layers, size, activation=
 
         Hint: use tf.layers.dense    
     """
-    # YOUR CODE HERE
-    raise NotImplementedError
-    return output_placeholder
+    # MY CODE HERE / substask (a)
+    # using dense layers to create fully connected feed forward network
+    with tf.variable_scope(scope):
+        l = input_placeholder
+        for n in range(n_layers):
+            l = tf.layers.dense(l, size, activation=activation, name='hidden_layer_{0}'.format(n))
+        output_placeholder = tf.layers.dense(l, output_size, activation=output_activation, name='output_layer')
+        # print(output_placeholder) # for debugging
+        # result = tf.verify_tensor_all_finite(output_placeholder, "pred not finite")
+        # print(result)
+        return output_placeholder
 
 def pathlength(path):
     return len(path["reward"])
@@ -95,14 +111,14 @@ class Agent(object):
                 sy_ac_na: placeholder for actions
                 sy_adv_n: placeholder for advantages
         """
-        raise NotImplementedError
         sy_ob_no = tf.placeholder(shape=[None, self.ob_dim], name="ob", dtype=tf.float32)
         if self.discrete:
             sy_ac_na = tf.placeholder(shape=[None], name="ac", dtype=tf.int32) 
         else:
             sy_ac_na = tf.placeholder(shape=[None, self.ac_dim], name="ac", dtype=tf.float32) 
-        # YOUR CODE HERE
-        sy_adv_n = None
+        # MY_CODE HERE / subtask (b) (ii)
+        # the shape of the advantage depends on batch size (used the hint in the parent function to find the dimensions)
+        sy_adv_n = tf.placeholder(shape=[None], name='adv', dtype=tf.float32)
         return sy_ob_no, sy_ac_na, sy_adv_n
 
 
@@ -134,15 +150,20 @@ class Agent(object):
                 Pass in self.n_layers for the 'n_layers' argument, and
                 pass in self.size for the 'size' argument.
         """
-        raise NotImplementedError
+        # raise NotImplementedError / subtask (b) (ii)
         if self.discrete:
-            # YOUR_CODE_HERE
-            sy_logits_na = None
+            # print("%"*100)
+            # MY_CODE_HERE
+            sy_logits_na = build_mlp(sy_ob_no, self.ac_dim, \
+                    scope='nn_policy', n_layers=self.n_layers, size=self.size)
             return sy_logits_na
         else:
-            # YOUR_CODE_HERE
-            sy_mean = None
-            sy_logstd = None
+            # MY_CODE_HERE
+            sy_mean = build_mlp(sy_ob_no, self.ac_dim, \
+                    scope='nn_policy', n_layers=self.n_layers, size=self.size)
+            # learn logstd for each output action
+            # sy_logstd = tf.Variable(tf.zeros([self.ac_dim]))  
+            sy_logstd = tf.constant(0.3, shape=[self.ac_dim])
             return (sy_mean, sy_logstd)
 
     #========================================================================================#
@@ -172,15 +193,18 @@ class Agent(object):
         
                  This reduces the problem to just sampling z. (Hint: use tf.random_normal!)
         """
-        raise NotImplementedError
+        # raise NotImplementedError / subtask (b) (iii)
         if self.discrete:
             sy_logits_na = policy_parameters
-            # YOUR_CODE_HERE
-            sy_sampled_ac = None
+            # MY_CODE_HERE
+            # remove axis 1 by reshape to put all the discrete actions in axis=0
+            sy_sampled_ac = tf.reshape(tf.multinomial(sy_logits_na, 1), [-1]) 
         else:
             sy_mean, sy_logstd = policy_parameters
-            # YOUR_CODE_HERE
-            sy_sampled_ac = None
+            # MY_CODE_HERE
+            sy_std = tf.exp(sy_logstd) # turn the logstd to std
+            # put it as in the above form mentioned in the comments
+            sy_sampled_ac = sy_mean + tf.random_normal(tf.shape(sy_mean)) * sy_logstd
         return sy_sampled_ac
 
     #========================================================================================#
@@ -209,15 +233,45 @@ class Agent(object):
                 For the discrete case, use the log probability under a categorical distribution.
                 For the continuous case, use the log probability under a multivariate gaussian.
         """
-        raise NotImplementedError
+        # raise NotImplementedError / subtask (b) (iv)
         if self.discrete:
             sy_logits_na = policy_parameters
-            # YOUR_CODE_HERE
-            sy_logprob_n = None
+            # MY_CODE_HERE
+            # negative log likelihood:
+            # http://raileecs.berkeley.edu/deeprlcourse/static/slides/lec-5.pdf#page=28
+            # TODO: negative of the following term?
+            # sy_ac_na = tf.reshape(sy_ac_na, [-1])
+            # print(sy_ac_na)
+            # print(sy_logits_na)
+
+            # FIXME: fix the dimensions for the following alternative
+            # lost a lot of time on softmax_cross_entropy_with_logits instead of
+            # using the sparse one - the following alternative gives a better
+            # idea baout sparse thing? 
+            sy_logprob_n = tf.nn.sparse_softmax_cross_entropy_with_logits(\
+                    logits=sy_logits_na,\
+                    labels=sy_ac_na)
+
+            # TODO: an alternative for the above command 
+            # didn't quite get what following does and why does the one_hot thing?!
+            # manually apply the cross-entropy thing
+            # A = tf.nn.log_softmax(sy_logits_na)
+            # one_hot_mask = tf.one_hot(sy_ac_na, self.ac_dim, on_value=True, off_value=False, dtype=tf.bool)
+            # sy_logprob_n = tf.boolean_mask(A, one_hot_mask)
+
         else:
             sy_mean, sy_logstd = policy_parameters
-            # YOUR_CODE_HERE
-            sy_logprob_n = None
+            sy_std = tf.exp(sy_logstd)
+            # MY_CODE_HERE
+            sy_z = (sy_ac_na - sy_mean) / (sy_std + eps) # create the normal_rv z 
+            # log(normal_pdf) = log[ (2π|Σ|)^(-0.5) + exp(-0.5*z**2) ] = ...
+            # ... -0.5log(2π|Σ|) -0.5z**2 = -0.5log(2π) -0.5log(|Σ|) -0.5z**2
+            term1 = tf.log(tf.cast(self.ac_dim, tf.float32)) - 0.5 * tf.log(2 * np.pi) # TODO: sigma
+            # term2 would be a constant so basically should affect the optimization.
+            term2 = 0 #-0.5 * tf.linalg.logdet(sy_std) # TODO: test and remove
+            # TODO: check the dimension of the sy_z and why reduce_sum!
+            term3 = -0.5 * tf.reduce_sum(tf.square(sy_z), axis=1) 
+            sy_logprob_n = term1 + term2 + term3
         return sy_logprob_n
 
     def build_computation_graph(self):
@@ -258,7 +312,9 @@ class Agent(object):
         #                           ----------PROBLEM 2----------
         # Loss Function and Training Operation
         #========================================================================================#
-        loss = None # YOUR CODE HERE
+        # http://rail.eecs.berkeley.edu/deeprlcourse/static/slides/lec-5.pdf#page=29
+        # MY CODE HERE / subtask (b) (v)
+        loss = tf.reduce_mean(tf.multiply(self.sy_logprob_n, self.sy_adv_n), name='loss') 
         self.update_op = tf.train.AdamOptimizer(self.learning_rate).minimize(loss)
 
         #========================================================================================#
@@ -306,9 +362,17 @@ class Agent(object):
             #====================================================================================#
             #                           ----------PROBLEM 3----------
             #====================================================================================#
-            raise NotImplementedError
-            ac = None # YOUR CODE HERE
-            ac = ac[0]
+            # raise NotImplementedError
+            # MY CODE HERE / subtask (a)
+            ac, logitval = self.sess.run([self.sy_sampled_ac, self.policy_parameters], feed_dict={self.sy_ob_no: ob[np.newaxis,:]})
+            # print(logitval) # for debugging
+            print("#"*10)
+            print(ac)
+            # assert False
+            ac = ac[0] # hack: because ac dim in discrete:1, continuous: 2
+            # if ac > 1:
+                # print(ac)
+                # assert False
             acs.append(ac)
             ob, rew, done, _ = env.step(ac)
             rewards.append(rew)
@@ -389,11 +453,44 @@ class Agent(object):
             Store the Q-values for all timesteps and all trajectories in a variable 'q_n',
             like the 'ob_no' and 'ac_na' above. 
         """
-        # YOUR_CODE_HERE
-        if self.reward_to_go:
-            raise NotImplementedError
-        else:
-            raise NotImplementedError
+        # MY_CODE_HERE
+        q_n = []
+
+        # dumb (CS101) but easy way:
+        n = 0
+        # for rewards in re_n:
+            # n += len(rewards) # for debugging purpose
+
+            # if not self.reward_to_go: # trajectory based 
+                # trj_sum = 0 
+                # for t in range(len(rewards)):
+                    # trj_sum += self.gamma ** t * rewards[t]
+                    # # trajectory based return
+                # trj_ret = np.repeat(trj_sum, len(rewards)) 
+                # q_n.extend(trj_ret)
+            # else: # reward to go (rtg)
+                # rtg_ret = [] # reward to go return
+                # rtg_sum = 0 
+                # for t in range(len(rewards)):
+                    # for tp in range(t, len(rewards)): # tp: t prime
+                        # rtg_sum += self.gamma ** (tp-t) * rewards[tp]
+                    # rtg_ret.append(rtg_sum)
+                # q_n.extend(rtg_ret)
+        # assert len(q_n) == n
+
+        # smart (algebraic-view) and efficient way:
+        n = 0
+        for rewards in re_n:
+            n += len(rewards) # for debugging purpose
+            discounts = self.gamma ** np.arange(len(rewards))
+            discounted_rewards = discounts * rewards
+            cumsum_discounted_reward = np.flip(np.cumsum(np.flip(discounted_rewards, axis=0)),
+                    axis=0) / discounts
+            if not self.reward_to_go:
+                cumsum_discounted_reward = np.repeat(cumsum_discounted_reward[0], len(rewards))
+            q_n.extend(cumsum_discounted_reward)
+        assert len(q_n) == n
+
         return q_n
 
     def compute_advantage(self, ob_no, q_n):
@@ -460,8 +557,7 @@ class Agent(object):
         if self.normalize_advantages:
             # On the next line, implement a trick which is known empirically to reduce variance
             # in policy gradient methods: normalize adv_n to have mean zero and std=1.
-            raise NotImplementedError
-            adv_n = None # YOUR_CODE_HERE
+            adv_n = (adv_n - np.mean(adv_n)) / (np.std(adv_n) + eps)
         return q_n, adv_n
 
     def update_parameters(self, ob_no, ac_na, q_n, adv_n):
@@ -512,7 +608,10 @@ class Agent(object):
         # and after an update, and then log them below. 
 
         # YOUR_CODE_HERE
-        raise NotImplementedError
+        # ac_na = ac_na.reshape((-1,))
+        _, logprob = self.sess.run([self.update_op, self.sy_logprob_n], feed_dict={self.sy_ob_no: ob_no, self.sy_ac_na: ac_na,\
+             self.sy_adv_n: adv_n})
+        print(logprob)
 
 
 def train_PG(
