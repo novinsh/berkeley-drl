@@ -542,7 +542,36 @@ class Agent(object):
             # TODO: use the moving mean and std to see if it's any better or not?
             # b_n = np.ones(len(b_n)) * self.q_n_mu + self.q_n_sig * b_n 
             b_n = np.mean(q_n) + np.std(q_n) * b_n
-            adv_n = q_n - b_n
+
+         
+            # gae with lambda:
+            offset=0
+            adv_n = []
+            for rewards in re_n:
+                adv_gae = [0]*len(rewards)
+                _last = len(rewards)-1
+                adv_gae[-1] = rewards[-1] - b_n[offset+_last]
+                # print(offset+_last) # debug this should be total_n-1
+                for t in reversed(range(_last)):
+                    delta = rewards[t] + self.gamma * b_n[offset+t+1] - b_n[offset+t]
+                    adv_gae[t] = delta +  self.gamma * self._lambda * adv_gae[t+1] 
+                if not self.reward_to_go:
+                    adv = np.ones(len(rewards)) * adv_gae[0]
+                adv_n.extend(adv_gae)
+                offset += len(rewards)
+            total_n = offset # for code redability define new variable
+
+            assert len(adv_n) == total_n
+                
+            # some initial debuggings of mine:
+            # print("#"*10)
+            # print("total: ", total)
+            # print(b_n.shape)
+            # print(b_n[0])
+            # print("#"*10)
+            # assert False
+
+            #adv_n = adv_n #q_n - b_n
         else:
             adv_n = q_n.copy()
         return adv_n
