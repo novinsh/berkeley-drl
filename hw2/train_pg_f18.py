@@ -1,5 +1,5 @@
 # solutions mainly inspired by
-# https://github.com/jalexvig/berkeley_deep_rl/blob/master/hw2/train_pg.py#L144
+# https://github.com/jalexvig/berkeley_deep_rl/blob/master/hw2/train_pg.py
 # Novin Oct, 2018
 #
 """
@@ -14,6 +14,7 @@ import logz
 import os
 import time
 import inspect
+import pandas as pd
 from multiprocessing import Process
 import roboschool
 
@@ -87,9 +88,14 @@ class Agent(object):
         self.min_timesteps_per_batch = sample_trajectory_args['min_timesteps_per_batch']
 
         self.gamma = estimate_return_args['gamma']
+        self._lambda = estimate_return_args['_lambda']
         self.reward_to_go = estimate_return_args['reward_to_go']
         self.nn_baseline = estimate_return_args['nn_baseline']
         self.normalize_advantages = estimate_return_args['normalize_advantages']
+
+        # for the advantage normalization using moving mean and std of the q_n
+        self.mving_qn_mu = []
+        self.mving_qn_sig = []
 
     def init_tf_sess(self):
         tf_config = tf.ConfigProto(inter_op_parallelism_threads=1, intra_op_parallelism_threads=1) 
@@ -325,16 +331,16 @@ class Agent(object):
         # neural network baseline. These will be used to fit the neural network baseline. 
         #========================================================================================#
         if self.nn_baseline:
-            raise NotImplementedError
+            # raise NotImplementedError
             self.baseline_prediction = tf.squeeze(build_mlp(
                                     self.sy_ob_no, 
                                     1, 
                                     "nn_baseline",
                                     n_layers=self.n_layers,
                                     size=self.size))
-            # YOUR_CODE_HERE
-            self.sy_target_n = None
-            baseline_loss = None
+            # MY_CODE_HERE / subtask 6 (a)
+            self.sy_target_n = tf.placeholder(shape=[None], name='bl', dtype=tf.float32)
+            baseline_loss = tf.nn.l2_loss(self.baseline_prediction - self.sy_target_n)
             self.baseline_update_op = tf.train.AdamOptimizer(self.learning_rate).minimize(baseline_loss)
 
     def sample_trajectories(self, itr, env):
@@ -366,8 +372,8 @@ class Agent(object):
             # MY CODE HERE / subtask (a)
             ac, logitval = self.sess.run([self.sy_sampled_ac, self.policy_parameters], feed_dict={self.sy_ob_no: ob[np.newaxis,:]})
             # print(logitval) # for debugging
-            print("#"*10)
-            print(ac)
+            # print("#"*10)
+            # print(ac)
             # assert False
             ac = ac[0] # hack: because ac dim in discrete:1, continuous: 2
             # if ac > 1:
@@ -493,7 +499,7 @@ class Agent(object):
 
         return q_n
 
-    def compute_advantage(self, ob_no, q_n):
+    def compute_advantage(self, ob_no, q_n, re_n):
         """
             Computes advantages by (possibly) subtracting a baseline from the estimated Q values
 
@@ -522,8 +528,20 @@ class Agent(object):
             # Hint #bl1: rescale the output from the nn_baseline to match the statistics
             # (mean and std) of the current batch of Q-values. (Goes with Hint
             # #bl2 in Agent.update_parameters.
-            raise NotImplementedError
-            b_n = None # YOUR CODE HERE
+            # raise NotImplementedError
+            # MY CODE HERE / substask 6 (b)
+            self.mving_qn_mu.append(np.mean(q_n))
+            self.mving_qn_sig.append(np.std(q_n))
+            # for later usage in update_parameters as well
+            self.q_n_mu = pd.rolling_mean(pd.Series(self.mving_qn_mu), 20) 
+            self.q_n_sig = pd.rolling_mean(pd.Series(self.mving_qn_sig), 20) 
+
+            b_n = self.sess.run(self.baseline_prediction, feed_dict={self.sy_ob_no:ob_no})
+            b_n = (b_n- np.mean(b_n)) / (np.std(b_n) + eps) # normalize b_n
+            # rescale b_n towards q_n's scale adv_n = q_n - b_n
+            # TODO: use the moving mean and std to see if it's any better or not?
+            # b_n = np.ones(len(b_n)) * self.q_n_mu + self.q_n_sig * b_n 
+            b_n = np.mean(q_n) + np.std(q_n) * b_n
             adv_n = q_n - b_n
         else:
             adv_n = q_n.copy()
@@ -548,8 +566,9 @@ class Agent(object):
                 adv_n: shape: (sum_of_path_lengths). A single vector for the estimated 
                     advantages whose length is the sum of the lengths of the paths
         """
-        q_n = self.sum_of_rewards(re_n)
-        adv_n = self.compute_advantage(ob_no, q_n)
+        # if gae-lambda=True result of this overwritten inside the compute_advantage
+        q_n = self.sum_of_rewards(re_n) 
+        adv_n = self.compute_advantage(ob_no, q_n, re_n)
         #====================================================================================#
         #                           ----------PROBLEM 3----------
         # Advantage Normalization
@@ -592,9 +611,14 @@ class Agent(object):
             # targets to have mean zero and std=1. (Goes with Hint #bl1 in 
             # Agent.compute_advantage.)
 
-            # YOUR_CODE_HERE
-            raise NotImplementedError
-            target_n = None 
+            # MY_CODE_HERE / subtask 6 (c)
+            # raise NotImplementedError
+            # TODO: using moving mean and std of the q_n
+            # q_n_normalized = (q_n - self.q_n_mu) / (self.q_n_sig + eps)  
+            # using mu, sig of the q_n only at current frame 
+            q_n_normalized = (q_n - np.mean(q_n))/ (np.std(q_n)+ eps)
+            target_n = self.sess.run(self.baseline_update_op, \
+                    feed_dict={self.sy_ob_no: ob_no, self.sy_target_n: q_n_normalized})
 
         #====================================================================================#
         #                           ----------PROBLEM 3----------
@@ -619,6 +643,7 @@ def train_PG(
         env_name,
         n_iter, 
         gamma, 
+        _lambda,
         min_timesteps_per_batch, 
         max_path_length,
         learning_rate, 
@@ -680,6 +705,7 @@ def train_PG(
 
     estimate_return_args = {
         'gamma': gamma,
+        '_lambda': _lambda,
         'reward_to_go': reward_to_go,
         'nn_baseline': nn_baseline,
         'normalize_advantages': normalize_advantages,
@@ -736,6 +762,7 @@ def main():
     parser.add_argument('--exp_name', type=str, default='vpg')
     parser.add_argument('--render', action='store_true')
     parser.add_argument('--discount', type=float, default=1.0)
+    parser.add_argument('--gae_discount', type=float, default=1.0)
     parser.add_argument('--n_iter', '-n', type=int, default=100)
     parser.add_argument('--batch_size', '-b', type=int, default=1000)
     parser.add_argument('--ep_len', '-ep', type=float, default=-1.)
@@ -770,6 +797,7 @@ def main():
                 env_name=args.env_name,
                 n_iter=args.n_iter,
                 gamma=args.discount,
+                _lambda = args.gae_discount,
                 min_timesteps_per_batch=args.batch_size,
                 max_path_length=max_path_length,
                 learning_rate=args.learning_rate,
