@@ -544,24 +544,29 @@ class Agent(object):
             b_n = np.mean(q_n) + np.std(q_n) * b_n
 
          
-            # gae with lambda:
-            offset=0
+            # gae with lambda - dynamic programming (starting from the end end of the trajectory)
+            # inspired by: https://github.com/daggertye/CS294_homework/blob/master/hw2/train_pg.py
+            # some parts from the above solution did not make sense so I changed it
+            # but my code is not giving correct results which means I got some part wrong
+            # or those parts that I adapted I shouldn't have
+            offset=0 # to access correct values from baseline
             adv_n = []
             for rewards in re_n:
                 adv_gae = [0]*len(rewards)
                 _last = len(rewards)-1
-                adv_gae[-1] = rewards[-1] - b_n[offset+_last]
-                # print(offset+_last) # debug this should be total_n-1
+                # build up values from the end of the trajectory to the beginning
+                adv_gae[-1] = rewards[-1] - b_n[offset+_last] # no b(s_{t+1}) for the last frame
+                # print(offset+_last) # for debug; this should be total_n-1
                 for t in reversed(range(_last)):
                     delta = rewards[t] + self.gamma * b_n[offset+t+1] - b_n[offset+t]
-                    adv_gae[t] = delta +  self.gamma * self._lambda * adv_gae[t+1] 
+                    adv_gae[t] = delta +  self.gamma * self._lambda * adv_gae[t+1]
                 if not self.reward_to_go:
                     adv = np.ones(len(rewards)) * adv_gae[0]
                 adv_n.extend(adv_gae)
                 offset += len(rewards)
             total_n = offset # for code redability define new variable
 
-            assert len(adv_n) == total_n
+            assert len(adv_n) == total_n # to make sure
                 
             # some initial debuggings of mine:
             # print("#"*10)
@@ -571,7 +576,8 @@ class Agent(object):
             # print("#"*10)
             # assert False
 
-            #adv_n = adv_n #q_n - b_n
+            # http://rail.eecs.berkeley.edu/deeprlcourse/static/slides/lec-6.pdf#page=22
+            # adv_n = adv_n + b_n
         else:
             adv_n = q_n.copy()
         return adv_n
