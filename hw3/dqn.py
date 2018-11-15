@@ -10,6 +10,7 @@ import tensorflow                as tf
 import tensorflow.contrib.layers as layers
 from collections import namedtuple
 from dqn_utils import *
+from datetime import datetime
 
 OptimizerSpec = namedtuple("OptimizerSpec", ["constructor", "kwargs", "lr_schedule"])
 
@@ -176,6 +177,10 @@ class QLearner(object):
     # TODO: what is the use of the followings? is it for the replay buffer?
     q_func_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='q_func')
     target_q_func_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='target_q_func')
+
+
+    # model saver for replay and later usage in test time
+    self.date_string = f'{datetime.now():%Y-%m-%d %H:%M:%S%z}' # as a signature for the log file
 
     ######
 
@@ -369,8 +374,18 @@ class QLearner(object):
       with open(self.rew_file, 'wb') as f:
         pickle.dump(episode_rewards, f, pickle.HIGHEST_PROTOCOL)
 
+  def save_model(self):
+    if self.model_initialized:
+        exp_name =  "atari_" + self.date_string
+        print('saved_models/'+ exp_name +'.ckpt')
+        self.saver = tf.train.Saver(tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='q_func')) 
+        save_path = self.saver.save(self.session, 'saved_models/'+ exp_name +'.ckpt')
+        print("Model saved in path: %s" % saved_path)
+
 def learn(*args, **kwargs):
   alg = QLearner(*args, **kwargs)
+  i=0
+  save_model_freq = 1
   while not alg.stopping_criterion_met():
     alg.step_env()
     # at this point, the environment should have been advanced one step (and
@@ -378,4 +393,8 @@ def learn(*args, **kwargs):
     # observation
     alg.update_model()
     alg.log_progress()
+    # save model for replay later
+    if i % save_model_freq == 0 and i > 1:
+        alg.save_model()
+    i+=1
 
