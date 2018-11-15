@@ -159,6 +159,23 @@ class QLearner(object):
     ######
 
     # YOUR CODE HERE
+    # calculate q_value for currenet step
+    # calculate q_value for the next time step
+    q_val_t = q_func(obs_t_float, self.num_actions, scope="q_func", reuse=False)
+    q_val_tp1 = q_func(obs_tp1_float, self.num_actions, scope="q_func_tp1", reuse=False)
+    self.best_action = tf.argmax(q_val_t, axis=1) # the one that maximizes the q-value
+    # TODO: use the best action to get the q_max 
+    q_max = tf.reduce_max(q_val_t, axis=1)
+    # the q_value estimate for the next taken state-action (Q')
+    y = self.rew_t_ph + gamma * (1.0-self.done_mask_ph)*q_max
+    # q_value of the taken action (Q)
+    q_cur_action = tf.reduce_sum(tf.multiply(q_val_t, \
+        tf.one_hot(self.act_t_ph, self.num_actions)), axis=1)
+
+    self.total_error = huber_loss(tf.abs(tf.subtract(q_cur_action, y)))
+    # TODO: what is the use of the followings? is it for the replay buffer?
+    q_func_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='q_func')
+    target_q_func_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='target_q_func')
 
     ######
 
@@ -229,6 +246,26 @@ class QLearner(object):
     #####
 
     # YOUR CODE HERE
+    idx = self.replay_buffer.store_frame(self.last_obs)
+
+    action = random.randint(0, self.num_actions-1)
+    if self.model_initialized:
+        # for the rest of the frames
+        obs = self.replay_buffer.encode_recent_observation()
+        action = self.session.run(self.best_action, feed_dict={self.obs_t_ph :[obs]})
+        eps = random.random()
+        # TODO: how is it done?
+        if eps < self.exploration.value(self.t) * self.num_actions * (1/(self.num_actions-1)):
+            action = random.randint(0, self.num_actions-1)
+
+
+    self.replay_buffer.encode_recent_observation()
+    obs_nxt, reward, done, info = self.env.step(action)
+    self.replay_buffer.store_effect(idx, action, reward, done)
+    if done:
+        obs = self.env.reset()
+    obs = obs_nxt
+    
 
   def update_model(self):
     ### 3. Perform experience replay and train the network.
@@ -274,7 +311,34 @@ class QLearner(object):
       #####
 
       # YOUR CODE HERE
+      # 3.a
+      obs_t_batch, act_batch, rew_batch, obs_tp1_batch, done_mask = \
+              self.replay_buffer.sample(self.batch_size)
+      # 3.b
+      if not self.model_initialized:
+          initialize_interdependent_variables(self.session, tf.global_variables(),\
+                  feed_dict={\
+                      self.obs_t_ph: obs_t_batch,\
+                      self.obs_tp1_ph: obs_tp1_batch\
+                  }
+          )
+          self.model_initialized = True
+    
+      # 3.c
+      _, total_error = self.session.run([self.train_fn, self.total_error], 
+              feed_dict={
+                  self.obs_t_ph: obs_t_batch,
+                  self.act_t_ph: act_batch,
+                  self.rew_t_ph: rew_batch,
+                  self.obs_tp1_ph: obs_tp1_batch,
+                  self.done_mask_ph: done_mask,
+                  self.learning_rate: self.optimizer_spec.lr_schedule.value(self.t)
+              }
+      )
 
+      # 3.d
+      if self.num_param_updates % self.target_update_freq == 0:
+          self.session.run(self.update_target_fn)
       self.num_param_updates += 1
 
     self.t += 1
