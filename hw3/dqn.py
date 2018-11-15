@@ -379,7 +379,7 @@ class QLearner(object):
         exp_name =  "atari_" + self.date_string
         print('saved_models/'+ exp_name +'.ckpt')
         self.saver = tf.train.Saver(tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='q_func')) 
-        save_path = self.saver.save(self.session, 'saved_models/'+ exp_name +'.ckpt')
+        saved_path = self.saver.save(self.session, 'saved_models/'+ exp_name +'.ckpt')
         print("Model saved in path: %s" % saved_path)
 
 def learn(*args, **kwargs):
