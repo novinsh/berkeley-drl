@@ -72,6 +72,7 @@ def lander_learn(env,
         exploration=lander_exploration_schedule(num_timesteps),
         stopping_criterion=lander_stopping_criterion(num_timesteps),
         double_q=True,
+        rew_file="lunar_lander",
         **lander_kwargs()
     )
     env.close()
