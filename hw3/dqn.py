@@ -168,12 +168,12 @@ class QLearner(object):
     # TODO: use the best action to get the q_max 
     q_max = tf.reduce_max(q_val_t, axis=1)
     # the q_value estimate for the next taken state-action (Q')
-    y = self.rew_t_ph + gamma * (1.0-self.done_mask_ph)*q_max
+    q_nxt_action = self.rew_t_ph + gamma * tf.multiply((1.0-self.done_mask_ph), q_max)
     # q_value of the taken action (Q)
     q_cur_action = tf.reduce_sum(tf.multiply(q_val_t, \
         tf.one_hot(self.act_t_ph, self.num_actions)), axis=1)
 
-    self.total_error = huber_loss(tf.abs(tf.subtract(q_cur_action, y)))
+    self.total_error = huber_loss(tf.abs(tf.subtract(q_cur_action, q_nxt_action)))
     # TODO: what is the use of the followings? is it for the replay buffer?
     q_func_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='q_func')
     target_q_func_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='target_q_func')
@@ -253,15 +253,16 @@ class QLearner(object):
     # YOUR CODE HERE
     idx = self.replay_buffer.store_frame(self.last_obs)
 
-    action = random.randint(0, self.num_actions-1)
     if self.model_initialized:
         # for the rest of the frames
         obs = self.replay_buffer.encode_recent_observation()
         action = self.session.run(self.best_action, feed_dict={self.obs_t_ph :[obs]})
         eps = random.random()
         # TODO: how is it done?
-        if eps < self.exploration.value(self.t) * self.num_actions * (1/(self.num_actions-1)):
+        if eps < self.exploration.value(self.t) * self.num_actions * (self.num_actions-1):
             action = random.randint(0, self.num_actions-1)
+    else:
+        action = random.randint(0, self.num_actions-1)
 
 
     self.replay_buffer.encode_recent_observation()
@@ -269,7 +270,8 @@ class QLearner(object):
     self.replay_buffer.store_effect(idx, action, reward, done)
     if done:
         obs = self.env.reset()
-    obs = obs_nxt
+    else:
+        obs = obs_nxt
     
 
   def update_model(self):
@@ -337,14 +339,14 @@ class QLearner(object):
                   self.rew_t_ph: rew_batch,
                   self.obs_tp1_ph: obs_tp1_batch,
                   self.done_mask_ph: done_mask,
-                  self.learning_rate: self.optimizer_spec.lr_schedule.value(self.t)
+                  self.learning_rate: self.optimizer_spec.lr_schedule.value(self.t) # TODO:
               }
       )
 
       # 3.d
+      self.num_param_updates += 1
       if self.num_param_updates % self.target_update_freq == 0:
           self.session.run(self.update_target_fn)
-      self.num_param_updates += 1
 
     self.t += 1
 
@@ -385,7 +387,7 @@ class QLearner(object):
 def learn(*args, **kwargs):
   alg = QLearner(*args, **kwargs)
   i=0
-  save_model_freq = 1
+  save_model_freq = 50
   while not alg.stopping_criterion_met():
     alg.step_env()
     # at this point, the environment should have been advanced one step (and
@@ -394,7 +396,10 @@ def learn(*args, **kwargs):
     alg.update_model()
     alg.log_progress()
     # save model for replay later
-    if i % save_model_freq == 0 and i > 1:
-        alg.save_model()
+    # if i % save_model_freq == 0 and i > 1:
+        # alg.save_model()
     i+=1
+  print(i, "#"*20)
+  print("save model for the last time")
+  self.save_model()
 
