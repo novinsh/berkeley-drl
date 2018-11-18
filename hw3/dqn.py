@@ -91,6 +91,9 @@ class QLearner(object):
     assert type(env.observation_space) == gym.spaces.Box
     assert type(env.action_space)      == gym.spaces.Discrete
 
+    # for the purpose of a signature in saving logs,models,etc. filename
+    self.date_string = f'{datetime.now():%Y-%m-%d %H:%M:%S%z}' 
+
     self.target_update_freq = target_update_freq
     self.optimizer_spec = optimizer_spec
     self.batch_size = batch_size
@@ -100,7 +103,8 @@ class QLearner(object):
     self.env = env
     self.session = session
     self.exploration = exploration
-    self.rew_file = str(uuid.uuid4()) + '.pkl' if rew_file is None else rew_file
+    rew_filename = rew_file + "_" + self.date_string + '.pkl'
+    self.rew_file = str(uuid.uuid4()) + '.pkl' if rew_file is None else rew_filename
 
     ###############
     # BUILD MODEL #
@@ -162,25 +166,26 @@ class QLearner(object):
     # YOUR CODE HERE
     # calculate q_value for currenet step
     # calculate q_value for the next time step
-    q_val_t = q_func(obs_t_float, self.num_actions, scope="q_func", reuse=False)
-    q_val_tp1 = q_func(obs_tp1_float, self.num_actions, scope="q_func_tp1", reuse=False)
-    self.best_action = tf.argmax(q_val_t, axis=1) # the one that maximizes the q-value
-    # TODO: use the best action to get the q_max 
-    q_max = tf.reduce_max(q_val_t, axis=1)
-    # the q_value estimate for the next taken state-action (Q')
-    q_nxt_action = self.rew_t_ph + gamma * tf.multiply((1.0-self.done_mask_ph), q_max)
-    # q_value of the taken action (Q)
-    q_cur_action = tf.reduce_sum(tf.multiply(q_val_t, \
+    self.q = q_func(obs_t_float, self.num_actions, scope="q_func", reuse=False) # Q Network
+    self.q_target = q_func(obs_tp1_float, self.num_actions, scope="target_q_func", reuse=False) # Q'Network
+
+    if double_q:
+        # second network to decorrelate noise between q value evaluation and action selection
+        q_action_eval = q_func(obs_tp1_float, self.num_actions, scope="q_func", reuse=True)
+        max_actions = tf.argmax(q_action_eval, axis=1)
+        q_max = tf.reduce_sum(tf.multiply(self.q_target, tf.one_hot(max_actions, self.num_actions)), axis=1)
+    else:
+        q_max = tf.reduce_max(self.q_target, axis=1)
+
+    y = self.rew_t_ph + gamma * tf.multiply((1.0-self.done_mask_ph), q_max)
+    q_val = tf.reduce_sum(tf.multiply(self.q, \
         tf.one_hot(self.act_t_ph, self.num_actions)), axis=1)
 
-    self.total_error = huber_loss(tf.abs(tf.subtract(q_cur_action, q_nxt_action)))
-    # TODO: what is the use of the followings? is it for the replay buffer?
+    self.total_error = tf.reduce_mean(huber_loss(q_val-y))
+
     q_func_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='q_func')
     target_q_func_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='target_q_func')
 
-
-    # model saver for replay and later usage in test time
-    self.date_string = f'{datetime.now():%Y-%m-%d %H:%M:%S%z}' # as a signature for the log file
 
     ######
 
@@ -253,25 +258,20 @@ class QLearner(object):
     # YOUR CODE HERE
     idx = self.replay_buffer.store_frame(self.last_obs)
 
-    if self.model_initialized:
-        # for the rest of the frames
-        obs = self.replay_buffer.encode_recent_observation()
-        action = self.session.run(self.best_action, feed_dict={self.obs_t_ph :[obs]})
-        eps = random.random()
-        # TODO: how is it done?
-        if eps < self.exploration.value(self.t) * self.num_actions * (self.num_actions-1):
-            action = random.randint(0, self.num_actions-1)
+    if not self.model_initialized or np.random.uniform() < self.exploration.value(self.t):
+        best_action = self.env.action_space.sample()
     else:
-        action = random.randint(0, self.num_actions-1)
-
+        obs_ = self.replay_buffer.encode_recent_observation() # encoded observation
+        actions = self.session.run(self.q, feed_dict={self.obs_t_ph :[obs_]})
+        best_action = np.argmax(actions, axis=1)[0]
 
     self.replay_buffer.encode_recent_observation()
-    obs_nxt, reward, done, info = self.env.step(action)
-    self.replay_buffer.store_effect(idx, action, reward, done)
+    obs_nxt, reward, done, info = self.env.step(best_action)
+    self.replay_buffer.store_effect(idx, best_action, reward, done)
+
+    self.last_obs = obs_nxt
     if done:
-        obs = self.env.reset()
-    else:
-        obs = obs_nxt
+        self.last_obs = self.env.reset()
     
 
   def update_model(self):
@@ -319,14 +319,14 @@ class QLearner(object):
 
       # YOUR CODE HERE
       # 3.a
-      obs_t_batch, act_batch, rew_batch, obs_tp1_batch, done_mask = \
+      obs_batch, act_batch, rew_batch, obs_nxt_batch, done_mask = \
               self.replay_buffer.sample(self.batch_size)
       # 3.b
       if not self.model_initialized:
           initialize_interdependent_variables(self.session, tf.global_variables(),\
                   feed_dict={\
-                      self.obs_t_ph: obs_t_batch,\
-                      self.obs_tp1_ph: obs_tp1_batch\
+                      self.obs_t_ph: obs_batch,\
+                      self.obs_tp1_ph: obs_nxt_batch\
                   }
           )
           self.model_initialized = True
@@ -334,19 +334,20 @@ class QLearner(object):
       # 3.c
       _, total_error = self.session.run([self.train_fn, self.total_error], 
               feed_dict={
-                  self.obs_t_ph: obs_t_batch,
+                  self.obs_t_ph: obs_batch,
                   self.act_t_ph: act_batch,
                   self.rew_t_ph: rew_batch,
-                  self.obs_tp1_ph: obs_tp1_batch,
+                  self.obs_tp1_ph: obs_nxt_batch,
                   self.done_mask_ph: done_mask,
                   self.learning_rate: self.optimizer_spec.lr_schedule.value(self.t) # TODO:
               }
       )
 
       # 3.d
-      self.num_param_updates += 1
       if self.num_param_updates % self.target_update_freq == 0:
           self.session.run(self.update_target_fn)
+
+      self.num_param_updates += 1
 
     self.t += 1
 
@@ -378,7 +379,9 @@ class QLearner(object):
 
   def save_model(self):
     if self.model_initialized:
-        exp_name =  "atari_" + self.date_string
+        envname = str(self.env.spec)
+        envname = envname[envname.find("(")+1:envname.find(")")]
+        exp_name =  envname + "_" + str(self.t) + "_" + self.date_string
         print('saved_models/'+ exp_name +'.ckpt')
         self.saver = tf.train.Saver(tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='q_func')) 
         saved_path = self.saver.save(self.session, 'saved_models/'+ exp_name +'.ckpt')
@@ -386,8 +389,7 @@ class QLearner(object):
 
 def learn(*args, **kwargs):
   alg = QLearner(*args, **kwargs)
-  i=0
-  save_model_freq = 50
+  save_model_milestone = {'500K':False, '1.5M': False, '2M': False, '4M':False}
   while not alg.stopping_criterion_met():
     alg.step_env()
     # at this point, the environment should have been advanced one step (and
@@ -395,11 +397,24 @@ def learn(*args, **kwargs):
     # observation
     alg.update_model()
     alg.log_progress()
-    # save model for replay later
-    # if i % save_model_freq == 0 and i > 1:
-        # alg.save_model()
-    i+=1
-  print(i, "#"*20)
+    # save models at different stages 
+    if alg.t > 5e4 and not save_model_milestone['500K']:
+        print("### save model %i step " % alg.t)
+        alg.save_model()
+        save_model_milestone['500K'] = True
+    elif alg.t > 1.5e6  and not save_model_milestone['1.5M']:
+        print("### save model %i step " % alg.t)
+        alg.save_model()
+        save_model_milestone['1.5M'] = True
+    elif alg.t > 2e6  and not save_model_milestone['2M']:
+        print("### save model %i step " % alg.t)
+        alg.save_model()
+        save_model_milestone['1.5M'] = True
+    elif alg.t > 4e6  and not save_model_milestone['4M']:
+        print("### save model %i step " % alg.t)
+        alg.save_model()
+        save_model_milestone['4M'] = True
+  print("#### step: ", alg.t)
   print("save model for the last time")
-  self.save_model()
+  alg.save_model()
 
