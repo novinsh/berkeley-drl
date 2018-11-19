@@ -1,3 +1,9 @@
+# Following solutions consulted in order to solve this homework:
+# https://github.com/jalexvig/berkeley_deep_rl/blob/master/hw3/dqn.py
+# https://github.com/daggertye/CS294_homework/blob/master/hw3/dqn.py
+# https://github.com/flaurida/berkeley-rl-hw3/blob/master/dqn.py
+# Novin, 
+# Nov 2018
 import uuid
 import time
 import pickle
@@ -94,6 +100,12 @@ class QLearner(object):
     # for the purpose of a signature in saving logs,models,etc. filename
     self.date_string = f'{datetime.now():%Y-%m-%d %H:%M:%S%z}' 
 
+    # for visualization
+    self.best_mean_rew = []
+    self.mean_rew = []
+    self.ts = [] # timestep
+
+
     self.target_update_freq = target_update_freq
     self.optimizer_spec = optimizer_spec
     self.batch_size = batch_size
@@ -177,7 +189,7 @@ class QLearner(object):
     else:
         q_max = tf.reduce_max(self.q_target, axis=1)
 
-    y = self.rew_t_ph + gamma * tf.multiply((1.0-self.done_mask_ph), q_max)
+    y = self.rew_t_ph + (1.0-self.done_mask_ph) * gamma * q_max
     q_val = tf.reduce_sum(tf.multiply(self.q, \
         tf.one_hot(self.act_t_ph, self.num_actions)), axis=1)
 
@@ -265,13 +277,13 @@ class QLearner(object):
         actions = self.session.run(self.q, feed_dict={self.obs_t_ph :[obs_]})
         best_action = np.argmax(actions, axis=1)[0]
 
-    self.replay_buffer.encode_recent_observation()
     obs_nxt, reward, done, info = self.env.step(best_action)
     self.replay_buffer.store_effect(idx, best_action, reward, done)
 
-    self.last_obs = obs_nxt
     if done:
         self.last_obs = self.env.reset()
+    else:
+        self.last_obs = obs_nxt
     
 
   def update_model(self):
@@ -321,6 +333,7 @@ class QLearner(object):
       # 3.a
       obs_batch, act_batch, rew_batch, obs_nxt_batch, done_mask = \
               self.replay_buffer.sample(self.batch_size)
+
       # 3.b
       if not self.model_initialized:
           initialize_interdependent_variables(self.session, tf.global_variables(),\
@@ -339,9 +352,10 @@ class QLearner(object):
                   self.rew_t_ph: rew_batch,
                   self.obs_tp1_ph: obs_nxt_batch,
                   self.done_mask_ph: done_mask,
-                  self.learning_rate: self.optimizer_spec.lr_schedule.value(self.t) # TODO:
+                  self.learning_rate: self.optimizer_spec.lr_schedule.value(self.t)
               }
       )
+      # print("total err: ", total_error)
 
       # 3.d
       if self.num_param_updates % self.target_update_freq == 0:
@@ -374,8 +388,17 @@ class QLearner(object):
 
       sys.stdout.flush()
 
+      # log for visualization
+      self.best_mean_rew.append(self.best_mean_episode_reward)
+      self.mean_rew.append(self.mean_episode_reward)
+      self.ts.append(self.t)
+
+      data = {'best_mean': self.best_mean_rew,
+              'mean_rew': self.mean_rew,
+              'ts:': self.ts}
+
       with open(self.rew_file, 'wb') as f:
-        pickle.dump(episode_rewards, f, pickle.HIGHEST_PROTOCOL)
+        pickle.dump(data, f, pickle.HIGHEST_PROTOCOL)
 
   def save_model(self):
     if self.model_initialized:
