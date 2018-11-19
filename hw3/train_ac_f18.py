@@ -11,6 +11,7 @@ import logz
 import os
 import time
 import inspect
+import roboschool
 from multiprocessing import Process
 
 eps = 1e-8
