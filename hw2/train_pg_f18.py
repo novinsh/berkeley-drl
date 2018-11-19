@@ -169,7 +169,7 @@ class Agent(object):
                     scope='nn_policy', n_layers=self.n_layers, size=self.size)
             # learn logstd for each output action
             # sy_logstd = tf.Variable(tf.zeros([self.ac_dim]))  
-            sy_logstd = tf.constant(0.3, shape=[self.ac_dim])
+            sy_logstd = tf.get_variable("logstd", shape=[self.ac_dim], trainable=True)
             return (sy_mean, sy_logstd)
 
     #========================================================================================#
@@ -208,9 +208,10 @@ class Agent(object):
         else:
             sy_mean, sy_logstd = policy_parameters
             # MY_CODE_HERE
+            z = tf.random_normal(tf.shape(sy_mean), mean=0.0, stddev=1.0)
             sy_std = tf.exp(sy_logstd) # turn the logstd to std
             # put it as in the above form mentioned in the comments
-            sy_sampled_ac = sy_mean + tf.random_normal(tf.shape(sy_mean)) * sy_logstd
+            sy_sampled_ac = sy_mean + sy_std * z
         return sy_sampled_ac
 
     #========================================================================================#
@@ -269,15 +270,19 @@ class Agent(object):
             sy_mean, sy_logstd = policy_parameters
             sy_std = tf.exp(sy_logstd)
             # MY_CODE_HERE
-            sy_z = (sy_ac_na - sy_mean) / (sy_std + eps) # create the normal_rv z 
+            # TODO: my own derivation is buggy!
+            # sy_z = (sy_ac_na - sy_mean) / (sy_std + eps) # create the normal_rv z 
             # log(normal_pdf) = log[ (2π|Σ|)^(-0.5) + exp(-0.5*z**2) ] = ...
             # ... -0.5log(2π|Σ|) -0.5z**2 = -0.5log(2π) -0.5log(|Σ|) -0.5z**2
-            term1 = tf.log(tf.cast(self.ac_dim, tf.float32)) - 0.5 * tf.log(2 * np.pi) # TODO: sigma
+            # term1 = tf.log(tf.cast(self.ac_dim, tf.float32)) - 0.5 * tf.log(2 * np.pi) # TODO: sigma
             # term2 would be a constant so basically should affect the optimization.
-            term2 = 0 #-0.5 * tf.linalg.logdet(sy_std) # TODO: test and remove
+            # term2 = 0 #-0.5 * tf.linalg.logdet(sy_std) # TODO: test and remove
             # TODO: check the dimension of the sy_z and why reduce_sum!
-            term3 = -0.5 * tf.reduce_sum(tf.square(sy_z), axis=1) 
-            sy_logprob_n = term1 + term2 + term3
+            # term3 = -0.5 * tf.reduce_sum(tf.square(sy_z), axis=1) 
+            # sy_logprob_n = term1 + term2 + term3
+            # following fix is the workaround but try to fix the buggy above as well
+            sy_logprob_n = tf.contrib.distributions.MultivariateNormalDiag(loc=sy_mean,
+                    scale_diag=tf.exp(sy_logstd)).log_prob(sy_ac_na)
         return sy_logprob_n
 
     def build_computation_graph(self):
