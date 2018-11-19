@@ -393,9 +393,9 @@ class QLearner(object):
       self.mean_rew.append(self.mean_episode_reward)
       self.ts.append(self.t)
 
-      data = {'best_mean': self.best_mean_rew,
-              'mean_rew': self.mean_rew,
-              'ts:': self.ts}
+      data = {'best_mean': np.array(self.best_mean_rew),
+              'mean_rew': np.array(self.mean_rew),
+              'ts': np.array(self.ts)}
 
       with open(self.rew_file, 'wb') as f:
         pickle.dump(data, f, pickle.HIGHEST_PROTOCOL)
