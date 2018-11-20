@@ -1,3 +1,8 @@
+# Following solution consulted in order to solve this homework:
+# https://github.com/buaazhangfan/CS294-112-Deep-Reinforcement-Learning/tree/master/hw3
+# Novin, 
+# Nov 2018
+
 """
 Original code from John Schulman for CS294 Deep Reinforcement Learning Spring 2017
 Adapted for CS294-112 Fall 2017 by Abhishek Gupta and Joshua Achiam
